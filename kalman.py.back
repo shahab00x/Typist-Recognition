@@ -1,0 +1,190 @@
+# First predict the new mean and variance then calculate with new measurements, if there is not much 
+# difference then update.
+import random
+import numpy as np
+import shelve
+
+class stru:
+    def __init__(self,mu=0,sigma=0):
+        self.mu = np.float64(mu)
+        self.sigma = np.float64(sigma)
+        
+#md = shelve.open("DB/measurementDB")
+def update(mean1, var1, mean2, var2):
+    new_mean = (var2 * mean1 + var1 * mean2) / (var1 + var2)
+    new_var = 1/(1/var1 + 1/var2)
+    return [new_mean, new_var]
+
+def predict(mean1, var1, mean2, var2):
+    new_mean = mean1 + mean2
+    new_var = var1 + var2
+    return [new_mean, new_var]
+
+def meanAndVariance(l):
+    m = 0.0
+    m = sum(l)/len(l)
+    v = 0.0
+    for i in l:
+        v += (i-m)**2
+    v = v/len(l)
+    return [m,v]
+
+#def meanAndVariance(data):
+#    n = 0
+#    Sum = 0
+#    Sum_sqr = 0
+# 
+#    for x in data:
+#        n = n + 1
+#        Sum = Sum + x
+#        Sum_sqr = Sum_sqr + x*x
+# 
+#    mean = Sum/n
+#    variance = (Sum_sqr - Sum*mean)/(n - 1)
+#    return [mean,variance]
+#measurements = [5., 6., 7., 9., 10.]
+#motion = [0., 0., 0., 0., 0.]
+#md = shelve.open("DB/measurementDB")
+measurement_sig = .2
+predict_sig = .007
+#mu = 0
+#sig = 10000
+passed = False
+
+#input1 = [[r for r in range(5*x,5*(x+1))] for x in range(4)]
+#input2 = [[random.uniform(0,5) for r in range(5)] for x in range(4)]
+def getDataToBeSaved(input1, input2,username):
+    global measurement_sig
+    global predict_sig
+#    global md
+    md = shelve.open("DB/predictSigmaDB",writeback = True)
+    saved = []
+    mu = 0
+    sigma = 0
+    for i in range(len(input1)):
+        temp = []
+        temp2 = []
+        for j in range(len(input1[i])):
+            temp.append(np.float64(input1[i][j]))
+            temp.append(np.float64(input2[i][j]))
+            if temp[0]<0.000000000001:temp[0] = 0.0000001
+            if temp[1]<0.000000000001:temp[1] = 0.0000002
+            mu,sigma = meanAndVariance(temp)
+            s = stru(mu,sigma)
+            temp2.append(s)
+            temp = []
+        saved.append(temp2)
+        temp2 = []
+    saved = np.copy(saved)
+    md[username] = predict_sig
+    md.close()
+    return saved
+
+#newInput = [[random.uniform(0,5) for r in range(5)] for x in range(4)]
+def analyzeNewInput(saved, newInput, username):
+    global predict_sig
+    global measurement_sig
+    md = shelve.open("DB/predictSigmaDB", writeback=True)
+    predict_sig = md[username]
+    
+    p = np.copy(saved) # predict the next round of data
+    for i in range(len(p)):
+        for j in range(len(p[i])):
+            p[i][j].mu,p[i][j].sigma = predict(p[i][j].mu, p[i][j].sigma, 0, predict_sig)
+            
+    b = []
+    mu = 0
+    sigma = 0
+    for i in p:
+        pr = 1
+        l = []
+        for j in range(len(i)):
+            l.append(i[j].mu)
+        mu,sigma = meanAndVariance(l)
+        print "mu,sigma,pr",mu,sigma,pr
+        b.append(stru(mu,sigma))
+        mu = 0
+        sigma = 0
+    sigma = 0
+    mu = 0
+    l = []
+    for i in b:
+        l.append(i.mu)
+    mu,sigma = meanAndVariance(l)
+    c = stru(mu,sigma)
+        
+    db = [sum(r)/len(r) for r in newInput]
+    dc = sum(db)/len(db)
+    print "c=[%s%s] dc=%s",c.mu,c.sigma,dc
+    if dc <= c.mu + np.sqrt(c.sigma) and dc >= c.mu-np.sqrt(c.sigma):
+        predict_sig = meanAndVariance([c.mu,dc])[1]
+        print "predict_sig",predict_sig
+        passed = True
+        print "pass"
+        for i in range(len(saved)):
+            for j in range(len(saved[i])):
+                saved[i][j].mu,saved[i][j].sigma = predict(saved[i][j].mu, saved[i][j].sigma,0, predict_sig)
+                saved[i][j].mu,saved[i][j].sigma = update(saved[i][j].mu, saved[i][j].sigma, newInput[i][j], measurement_sig)
+        md[username] = predict_sig
+    else:
+        passed = False
+        print "fail"
+    md.close()
+    return passed, saved
+"""
+def analyzeNewInput(saved, newInput, username):
+    global measurement_sig
+    global predict_sig
+    p = np.copy(saved) # predict the next round of data
+    for i in range(len(p)):
+        for j in range(len(p[i])):
+            p[i][j] = predict(p[i][j][0], p[i][j][1], 0, predict_sig)
+    
+#    m = np.copy(saved)
+#    m1 = [[random.uniform(0,5) for r in range(5)] for x in range(4)]
+#    for i in range(len(m)):
+#        for j in range(len(m[i])):
+#            m[i][j] = update(m[i][j][0], m[i][j][1], m1[i][j], measurement_sig)
+    
+#    global md
+    md = shelve.open("DB/measurementDB", writeback=True)
+    predict_sig = md[username]
+    print "measurement", predict_sig
+    passed = False
+#    print "saved",saved 
+    a = [0]*len(newInput[0])
+    b = [0]*len(newInput[0])
+    c = [0]*len(newInput[0])
+    print newInput
+    for j in range(len(newInput[0])):
+        for i in range(len(newInput)):
+#            if saved[i][j][1] != 0:
+            a[j] += (newInput[i][j] - p[i][j][0])**2 # - np.sqrt(saved[i][j][1]))/np.sqrt(saved[i][j][1])
+#            print "a[j] += " , newInput[i][j] ,"-", saved[i][j][0]
+            b[j] += 1./p[i][j][1]
+        a[j] = np.sqrt(a[j])
+        b[j] = np.sqrt(1./b[j])
+        c[j] = b[j]/2. - a[j]
+#    print "kalman a=",a
+    print "sum(b)=",sum(b)
+    print "sum(a)=",sum(a)
+    print "sum(c) = ",sum(c)
+    if sum(c)>0:
+        #ml,sl = meanAndVariance(a)
+        #predict_sig = sl
+        predict_sig = sum(b)/len(b)/20
+        print "measurement_sig=",measurement_sig
+        passed = True
+        print "passed"
+        for i in range(len(saved)):
+            for j in range(len(saved[i])):
+                saved[i][j] = predict(saved[i][j][0], saved[i][j][1],0, predict_sig)
+                saved[i][j] = update(saved[i][j][0],saved[i][j][1], newInput[i][j], measurement_sig)
+    else:
+        passed = False
+        print "failed"
+    md[username] = predict_sig
+    md.close()
+    return passed, saved
+
+#md.close()"""
